@@ -14,7 +14,12 @@
     msg_ok:            .string "✅ Correct\n"
     msg_wrong:         .string "❌ Wrong\n"
 
+
+    # ====== CONVERSION TEST String ======
+    msg_conv1:         .string "\n=== BF16 -> F32 TESTS ===\n"
+    msg_conv2:         .string "\n=== F32 -> BF16 TESTS ===\n"
     msg_add:           .string "\n=== BF16 ADD TESTS ===\n"
+    msg_sub:           .string "\n=== BF16 SUB TESTS ===\n"
     msg_mul:           .string "\n=== BF16 MUL TESTS ===\n"
     msg_div:           .string "\n=== BF16 DIV TESTS ===\n"
 
@@ -27,7 +32,6 @@
     msg6:              .string "1.0 + 0.015625 = "
 
     # ====== SUB String ======
-    msg_sub:           .string "\n=== BF16 SUB TESTS ===\n"
     msgs1:             .string "2.0 - 1.0 = "
     msgs2:             .string "5.0 - 2.0 = "
     msgs3:             .string "1.0 - 2.0 = "
@@ -56,6 +60,9 @@
     msgd6:             .string "NaN / 1.0 = "
     msgd7:             .string "(-2.0) / 1.0 = "
 
+    # ======= CONVERSION expected output =======
+    conv_expect_b2f:   .word   0x3F800000, 0xC0000000     
+    conv_expect_f2b:   .half   0x4060, 0xC194              
     # ======= ADD expected output =======
     add_expect:        .half   0x4040, 0x0000, 0x7F80, 0x7FC0, 0x7FC1, 0x3F80
     # ======= SUB expected output =======
@@ -70,6 +77,84 @@ main:
     li      s0, 255
     lui     t0, 0x8
     addi    s11, t0, -0x80               # s11 = 0x7F80 (Inf mask)
+
+    # ------------------------------
+    # BF16 -> F32 TESTS
+    # ------------------------------
+    la      a0, msg_conv1
+    li      a7, 4
+    ecall
+
+    la      a0, msg_input
+    li      a7, 4
+    ecall
+    li      a0, 0x3F80
+    li      a7, 34
+    ecall
+
+    li      a0, 0x3F80
+    jal     ra, bf16_to_f32
+    mv      t0, a0
+
+    la      a1, conv_expect_b2f
+    li      a2, 0
+    li      a3, 1               
+    jal     ra, compare_result
+
+    la      a0, msg_input
+    li      a7, 4
+    ecall
+    li      a0, 0xC000
+    li      a7, 34
+    ecall
+
+    li      a0, 0xC000
+    jal     ra, bf16_to_f32
+    mv      t0, a0
+
+    la      a1, conv_expect_b2f
+    li      a2, 1
+    li      a3, 1
+    jal     ra, compare_result
+    
+    # ------------------------------
+    # F32 -> BF16 TESTS
+    # ------------------------------
+    la      a0, msg_conv2
+    li      a7, 4
+    ecall
+
+    la      a0, msg_input
+    li      a7, 4
+    ecall
+    li      a0, 0x40600000
+    li      a7, 34
+    ecall
+
+    li      a0, 0x40600000
+    jal     ra, f32_to_bf16
+    mv      t0, a0
+
+    la      a1, conv_expect_f2b
+    li      a2, 0
+    li      a3, 0               
+    jal     ra, compare_result
+
+    la      a0, msg_input
+    li      a7, 4
+    ecall
+    li      a0, 0xC19447AE
+    li      a7, 34
+    ecall
+
+    li      a0, 0xC19447AE
+    jal     ra, f32_to_bf16
+    mv      t0, a0
+
+    la      a1, conv_expect_f2b
+    li      a2, 1
+    li      a3, 0
+    jal     ra, compare_result
 
     # ------------------------------
     # ADD TEST
@@ -395,24 +480,35 @@ main:
     ecall
 					  
 # =======================================================
-# compare_result(a0, expect_addr, idx)
+# compare_result(a0, expect_addr, idx, is32bit)
 # =======================================================
-# a0 = actual result (16-bit)
+# a0 = actual result (16-bit or 32-bit)
 # a1 = address of expected value table
 # a2 = test case index (0-based)
+# a3 = is32bit flag (1 = 32-bit, 0 = 16-bit)
 # =======================================================
 compare_result:
-    addi    sp, sp, -16
+    addi    sp, sp, -20
     sw      t0, 0(sp)
     sw      t1, 4(sp)
     sw      t2, 8(sp)
     sw      t3, 12(sp)
+    sw      t4, 16(sp)
 
-    mv      t0, a0
-    slli    t1, a2, 1
+    mv      t0, a0               # 實際結果
+    beqz    a3, half_case        # 判斷是否為16bit
+    slli    t1, a2, 2            # 若是 32-bit，每個元素4 bytes
+    add     t2, a1, t1
+    lw      t3, 0(t2)
+    j       load_done
+
+half_case:
+    slli    t1, a2, 1            # 若是 16-bit，每個元素2 bytes
     add     t2, a1, t1
     lhu     t3, 0(t2)
-    li      t4, 0xFFFF
+
+load_done:
+    li      t4, 0xFFFFFFFF
     and     t0, t0, t4
     and     t3, t3, t4
 
@@ -459,7 +555,8 @@ done:
     lw      t1, 4(sp)
     lw      t2, 8(sp)
     lw      t3, 12(sp)
-    addi    sp, sp, 16
+    lw      t4, 16(sp)
+    addi    sp, sp, 20
     ret
 
 # ------------------------------
@@ -1034,11 +1131,11 @@ return_b:
 # multiply8(a0, a1): Egyptian Multiplication
 # =======================================================
 # Parameters:			 
-# a0 = multiplicand (8-bit)
-# a1 = multiplier   (8-bit)
+#     a0 = multiplicand (8-bit)
+#     a1 = multiplier   (8-bit)
 # 		 
 # Return: 
-#	a0 = 16-bit result
+#     a0 = 16-bit result
 # =======================================================
 multiply8:
     mv      s10, a0
