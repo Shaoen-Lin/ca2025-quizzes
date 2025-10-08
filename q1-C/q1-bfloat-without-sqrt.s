@@ -495,15 +495,15 @@ compare_result:
     sw      t3, 12(sp)
     sw      t4, 16(sp)
 
-    mv      t0, a0               # 實際結果
-    beqz    a3, half_case        # 判斷是否為16bit
-    slli    t1, a2, 2            # 若是 32-bit，每個元素4 bytes
+    mv      t0, a0               
+    beqz    a3, half_case        
+    slli    t1, a2, 2            
     add     t2, a1, t1
     lw      t3, 0(t2)
     j       load_done
 
 half_case:
-    slli    t1, a2, 1            # 若是 16-bit，每個元素2 bytes
+    slli    t1, a2, 1            
     add     t2, a1, t1
     lhu     t3, 0(t2)
 
